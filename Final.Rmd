@@ -27,7 +27,16 @@ library(vip)
 library(AppliedPredictiveModeling)
 library(mgcv)
 library(nlme)
+library(rpart)
+library(rpart.plot)
+library(party)
+library(partykit)
+library(randomForest)
+library(ranger)
+library(gbm)
+```
 
+```{r}
 heartattack = read_csv("heartattack.csv") %>%
               mutate(
                 sex = factor(case_when(sex == 0 ~ "Female",
@@ -161,7 +170,8 @@ plot(model.glmn, par.settings = myPar, xTrans = function(x) log(x))
 set.seed(100)
 gam.fit <- train(x_train,y_train,
                  method="gam",
-                 #tuneGrid = data.frame(method = "GCV.Cp",select=c(TRUE,FALSE)),
+                 metric = "ROC",
+                 tuneGrid = data.frame(method = "GCV.Cp",select=c(TRUE,FALSE)),
                  trControl = ctrl)
 gam.fit$bestTune
 gam.fit$results
@@ -192,12 +202,63 @@ vip(model.mars$finalModel)
 ## LDA
 
 ```{r}
-partimat(output ~ horsepower+displacement+acceleration+weight, 
-         data = heartattack, subset = indexTrain, method = "lda")
+partimat(output~age+caa+trtbps+chol+thalachh, method = "lda", data = heartattack)
+
+lda.fit <- lda(output~., data = heartattack,subset = indexTrain)
+
+plot(lda.fit, col = as.numeric(heartattack$output), abbrev = TRUE)
+
+lda.fit$scaling
+
+ctrl <- trainControl(method = "repeatedcv", 
+                     repeats = 5,
+                     summaryFunction = twoClassSummary,
+                     classProbs = TRUE)
+
+set.seed(100)
+
+model.lda = train(output ~ .,
+                  data = training_df,
+                  method = "lda",
+                  metric = "ROC",
+                  trControl = ctrl)
+
 ```
+
+# CTREE
+
 ```{r}
-lda.fit <- lda(diabetes~., data = dat,
-               subset = rowTrain)
+set.seed(100)
 
+tree1 <- rpart(formula = output ~ . ,data = heartattack, subset = indexTrain, control = rpart.control(cp = 0))
+
+rpart.plot(tree1)
+
+printcp(tree1)
+
+cpTable <- tree1$cptable
+plotcp(tree1)
+
+minErr <- which.min(cpTable[,4])
+tree2 <- prune(tree1, cp = cpTable[minErr,1])
+rpart.plot(tree2)
 ```
 
+# Random Tree
+
+```{r}
+# test error
+set.seed(100)
+rf <- randomForest(output~ . ,heartattack, subset = indexTrain ,mtry = 6)
+
+pred.rf <- predict(rf, newdata = testing_df)
+confusionMatrix(data = pred.rf, 
+                reference = heartattack$output[-indexTrain])
+
+set.seed(100)
+rf2 <- ranger(output ~ . ,training_df ,mtry = 6)
+pred.rf2 <- predict(rf2, data = testing_df)$predictions
+
+confusionMatrix(data = pred.rf2, 
+                reference = heartattack$output[-indexTrain])
+```
