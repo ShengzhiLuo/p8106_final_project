@@ -22,6 +22,30 @@ library(jpeg)
 library(MASS)
 library(pROC)
 library(klaR)
+library(pdp)
+library(vip)
+library(AppliedPredictiveModeling)
+library(mgcv)
+library(nlme)
+
+heartattack = read_csv("heartattack.csv") %>%
+              mutate(
+                sex = factor(case_when(sex == 0 ~ "Female",
+                                   sex == 1 ~ "Male")),
+                cp = factor(case_when(cp == 1 ~ "typical angina",
+                                      cp == 2 ~ "atypical angina",
+                                      cp == 3 ~ "non-anginal pain",
+                                      cp == 4 ~ "asymptomatic")),
+                fbs = factor(case_when(fbs == 1 ~ "true",
+                                   fbs == 0 ~ "false")),
+                restecg = factor(case_when(restecg == 0 ~ "normal",
+                                   restecg == 1 ~ "having ST-T wave abnormality",
+                                   restecg == 2 ~ "showing probable or definite left ventricular hypertrophy by Estes' criteria")),
+                output = factor(case_when(output== 0 ~ "less chance of heart attack",
+                                   output == 1 ~ "more chance of heart attack"))
+              )%>%
+  na.omit()
+
 knitr::opts_chunk$set(warning = FALSE, message = FALSE, fig.align = "center")
 theme_set(theme_minimal() + theme(legend.position = "bottom"))
 options(
@@ -34,45 +58,56 @@ scale_fill_discrete = scale_fill_viridis_d
 
 ```{r message=FALSE}
 # Load data, clean column names, eliminate rows containing NA entries
-auto_data = read.csv("./auto.csv") %>% 
-  janitor::clean_names() %>% 
-  na.omit() %>% 
-  mutate(
-    cylinders = as.factor(cylinders),
-    year = as.factor(year),
-    origin = factor(case_when(origin == 1 ~ "American",
-                                   origin == 2 ~ "European",
-                                   origin == 3 ~ "Japanese")),
-    mpg_cat = factor(mpg_cat, levels = c("low", "high"))
-    ) 
+heartattack = read_csv("heartattack.csv") %>%
+              mutate(
+                sex = factor(case_when(sex == 0 ~ "Female",
+                                   sex == 1 ~ "Male")),
+                exng = factor(case_when(exng == 0 ~ "no",
+                                   exng == 1 ~ "yes")),
+                cp = factor(case_when(cp == 3 ~ "typical angina",
+                                      cp == 2 ~ "atypical angina",
+                                      cp == 1 ~ "non-anginal pain",
+                                      cp == 0 ~ "asymptomatic")),
+                fbs = factor(case_when(fbs == 1 ~ "true",
+                                   fbs == 0 ~ "false")),
+                restecg = factor(case_when(restecg == 0 ~ "normal",
+                                   restecg == 1 ~ "having ST-T wave abnormality",
+                                   restecg == 2 ~ "showing probable or definite left ventricular hypertrophy by Estes' criteria")),
+                output = factor(case_when(output== 0 ~ "less",
+                                   output == 1 ~ "more")),
+                output = fct_relevel(output, "less")
+              )%>%
+  na.omit()%>%
+  dplyr::select(-oldpeak, -thall, -slp)
+
 set.seed(5009)
 # Partition data into training/test sets
-indexTrain = createDataPartition(y = auto_data$mpg_cat,
+indexTrain = createDataPartition(y = heartattack$output,
                                  p = 0.7,
                                  list = FALSE)
-training_df = auto_data[indexTrain, ]
-testing_df = auto_data[-indexTrain, ]
+training_df = heartattack[indexTrain, ]
+testing_df = heartattack[-indexTrain, ]
 # Create matrices for future analysis
 # Training data
-x_train = model.matrix(mpg_cat~.,training_df)[, -1]
-y_train = training_df$mpg_cat
+x_train = model.matrix(output~.,training_df)[, -11]
+y_train = training_df$output
 # Testing data
-x_test <- model.matrix(mpg_cat~.,testing_df)[, -1]
-y_test <- testing_df$mpg_cat
+x_test <- model.matrix(output~.,testing_df)[, -11]
+y_test <- testing_df$output
 ```
 
 
 ```{r}
-summary(auto_data)
-skimr::skim_without_charts(auto_data)
+summary(heartattack)
+skimr::skim_without_charts(heartattack)
 ```
 
 
 ```{r}
 theme1 = transparentTheme(trans = 0.4)
 trellis.par.set(theme1)
-featurePlot(x = auto_data %>% dplyr::select(horsepower, displacement, acceleration, weight),
-            y = auto_data$mpg_cat,
+featurePlot(x = heartattack %>% dplyr::select(age, caa, trtbps, thalachh),
+            y = heartattack$output,
             scales = list(x = list(relation = "free"),
                           y = list(relation = "free")),
             plot = "density", pch = "|",
@@ -82,8 +117,8 @@ featurePlot(x = auto_data %>% dplyr::select(horsepower, displacement, accelerati
 
 
 ```{r}
-x <- model.matrix(mpg_cat~horsepower+displacement+acceleration+weight, auto_data)[,-1]
-y <- auto_data$mpg_cat
+x <- model.matrix(output~age+caa+trtbps+chol+thalachh, heartattack)[,-11]
+y <- heartattack$output
 corrplot::corrplot(cor(x))
 ```
 
@@ -93,8 +128,8 @@ set.seed(100)
 ctrl = trainControl(method = "cv",
                     summaryFunction = twoClassSummary,
                     classProbs = TRUE)
-glm.fit = glm(mpg_cat ~ .,
-              data = auto_data,
+glm.fit = glm(output ~ .,
+              data = heartattack,
               subset = indexTrain,
               family = binomial(link = "logit"))
 summary(glm.fit)
@@ -148,7 +183,7 @@ plot(model.mars)
 
 coef(model.mars$finalModel) %>% knitr::kable(col.names = "Coefficient") 
 
-pdp::partial(model.mars, pred.var = c("weight"), grid.resolution = 200) %>% autoplot()
+pdp::partial(model.mars, pred.var = c("age"), grid.resolution = 200) %>% autoplot()
 vip(model.mars$finalModel)
 
 ```
@@ -157,8 +192,8 @@ vip(model.mars$finalModel)
 ## LDA
 
 ```{r}
-partimat(mpg_cat ~ horsepower+displacement+acceleration+weight, 
-         data = auto_data, subset = indexTrain, method = "lda")
+partimat(output ~ horsepower+displacement+acceleration+weight, 
+         data = heartattack, subset = indexTrain, method = "lda")
 ```
 ```{r}
 lda.fit <- lda(diabetes~., data = dat,
