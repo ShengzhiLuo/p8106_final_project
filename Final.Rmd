@@ -1,0 +1,168 @@
+---
+title: "Final"
+author: "Shengzhi Luo"
+date: "06/05/2022"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(viridis)
+library(mlbench)
+library(ISLR)
+library(caret)
+library(e1071)
+library(kernlab)
+library(factoextra)
+library(gridExtra)
+library(corrplot)
+library(RColorBrewer) 
+library(gplots)
+library(jpeg)
+library(MASS)
+library(pROC)
+library(klaR)
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, fig.align = "center")
+theme_set(theme_minimal() + theme(legend.position = "bottom"))
+options(
+  ggplot2.continuous.colour = "viridis",
+  ggplot2.continuous.fill = "viridis"
+)
+scale_colour_discrete = scale_colour_viridis_d
+scale_fill_discrete = scale_fill_viridis_d
+```
+
+```{r message=FALSE}
+# Load data, clean column names, eliminate rows containing NA entries
+auto_data = read.csv("./auto.csv") %>% 
+  janitor::clean_names() %>% 
+  na.omit() %>% 
+  mutate(
+    cylinders = as.factor(cylinders),
+    year = as.factor(year),
+    origin = factor(case_when(origin == 1 ~ "American",
+                                   origin == 2 ~ "European",
+                                   origin == 3 ~ "Japanese")),
+    mpg_cat = factor(mpg_cat, levels = c("low", "high"))
+    ) 
+set.seed(5009)
+# Partition data into training/test sets
+indexTrain = createDataPartition(y = auto_data$mpg_cat,
+                                 p = 0.7,
+                                 list = FALSE)
+training_df = auto_data[indexTrain, ]
+testing_df = auto_data[-indexTrain, ]
+# Create matrices for future analysis
+# Training data
+x_train = model.matrix(mpg_cat~.,training_df)[, -1]
+y_train = training_df$mpg_cat
+# Testing data
+x_test <- model.matrix(mpg_cat~.,testing_df)[, -1]
+y_test <- testing_df$mpg_cat
+```
+
+
+```{r}
+summary(auto_data)
+skimr::skim_without_charts(auto_data)
+```
+
+
+```{r}
+theme1 = transparentTheme(trans = 0.4)
+trellis.par.set(theme1)
+featurePlot(x = auto_data %>% dplyr::select(horsepower, displacement, acceleration, weight),
+            y = auto_data$mpg_cat,
+            scales = list(x = list(relation = "free"),
+                          y = list(relation = "free")),
+            plot = "density", pch = "|",
+            auto.key = list(columns = 2))
+```
+
+
+
+```{r}
+x <- model.matrix(mpg_cat~horsepower+displacement+acceleration+weight, auto_data)[,-1]
+y <- auto_data$mpg_cat
+corrplot::corrplot(cor(x))
+```
+
+## glm/glmn
+```{r}
+set.seed(100)
+ctrl = trainControl(method = "cv",
+                    summaryFunction = twoClassSummary,
+                    classProbs = TRUE)
+glm.fit = glm(mpg_cat ~ .,
+              data = auto_data,
+              subset = indexTrain,
+              family = binomial(link = "logit"))
+summary(glm.fit)
+```
+
+
+```{r}
+glmnGrid <- expand.grid(.alpha = seq(0, 1, length = 11),
+                        .lambda = exp(seq(2, -2, length = 35)))
+set.seed(100)
+model.glmn <- train(x = x_train,
+                    y = y_train,
+                    method = "glmnet",
+                    tuneGrid = glmnGrid,
+                    metric = "ROC",
+                    trControl = ctrl)
+
+model.glmn$bestTune
+
+myCol<- rainbow(15)
+myPar <- list(superpose.symbol = list(col = myCol),
+              superpose.line = list(col = myCol))
+
+plot(model.glmn, par.settings = myPar, xTrans = function(x) log(x))
+```
+
+## GAM
+```{r}
+set.seed(100)
+gam.fit <- train(x_train,y_train,
+                 method="gam",
+                 #tuneGrid = data.frame(method = "GCV.Cp",select=c(TRUE,FALSE)),
+                 trControl = ctrl)
+gam.fit$bestTune
+gam.fit$results
+gam.fit$finalModel
+```
+
+## Mars
+```{r, warning=FALSE}
+set.seed(5009)
+model.mars <- train(x = x_train,
+                    y = y_train,
+                    method = "earth",
+                    tuneGrid = expand.grid(degree = 1:3, 
+                                           nprune = 2:15),
+                    metric = "ROC",
+                    trControl = ctrl)
+
+plot(model.mars)
+
+coef(model.mars$finalModel) %>% knitr::kable(col.names = "Coefficient") 
+
+pdp::partial(model.mars, pred.var = c("weight"), grid.resolution = 200) %>% autoplot()
+vip(model.mars$finalModel)
+
+```
+
+
+## LDA
+
+```{r}
+partimat(mpg_cat ~ horsepower+displacement+acceleration+weight, 
+         data = auto_data, subset = indexTrain, method = "lda")
+```
+```{r}
+lda.fit <- lda(diabetes~., data = dat,
+               subset = rowTrain)
+
+```
+
