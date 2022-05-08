@@ -37,37 +37,9 @@ library(gbm)
 ```
 
 # Data load and pre-process
-```{r}
-heartattack = read_csv("heartattack.csv") %>%
-              mutate(
-                sex = factor(case_when(sex == 0 ~ "Female",
-                                   sex == 1 ~ "Male")),
-                cp = factor(case_when(cp == 1 ~ "typical angina",
-                                      cp == 2 ~ "atypical angina",
-                                      cp == 3 ~ "non-anginal pain",
-                                      cp == 4 ~ "asymptomatic")),
-                fbs = factor(case_when(fbs == 1 ~ "true",
-                                   fbs == 0 ~ "false")),
-                restecg = factor(case_when(restecg == 0 ~ "normal",
-                                   restecg == 1 ~ "having ST-T wave abnormality",
-                                   restecg == 2 ~ "showing probable or definite left ventricular hypertrophy by Estes' criteria")),
-                output = factor(case_when(output== 0 ~ "less chance of heart attack",
-                                   output == 1 ~ "more chance of heart attack"))
-              )%>%
-  na.omit()
-
-knitr::opts_chunk$set(warning = FALSE, message = FALSE, fig.align = "center")
-theme_set(theme_minimal() + theme(legend.position = "bottom"))
-options(
-  ggplot2.continuous.colour = "viridis",
-  ggplot2.continuous.fill = "viridis"
-)
-scale_colour_discrete = scale_colour_viridis_d
-scale_fill_discrete = scale_fill_viridis_d
-```
 
 ```{r message=FALSE}
-# Load data, clean column names, eliminate rows containing NA entries
+# Load data, clean column names, eliminate indexs containing NA entries
 heartattack = read_csv("heartattack.csv") %>%
               mutate(
                 sex = factor(case_when(sex == 0 ~ "Female",
@@ -90,7 +62,18 @@ heartattack = read_csv("heartattack.csv") %>%
   na.omit()%>%
   dplyr::select(-oldpeak, -thall, -slp)
 
-set.seed(5009)
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, fig.align = "center")
+theme_set(theme_minimal() + theme(legend.position = "bottom"))
+options(
+  ggplot2.continuous.colour = "viridis",
+  ggplot2.continuous.fill = "viridis"
+)
+scale_colour_discrete = scale_colour_viridis_d
+scale_fill_discrete = scale_fill_viridis_d
+```
+
+```{r}
+set.seed(100)
 # Partition data into training/test sets
 indexTrain = createDataPartition(y = heartattack$output,
                                  p = 0.7,
@@ -106,12 +89,10 @@ x_test <- model.matrix(output~.,testing_df)[, -11]
 y_test <- testing_df$output
 ```
 
-
 ```{r}
 summary(heartattack)
 skimr::skim_without_charts(heartattack)
 ```
-
 
 ```{r}
 theme1 = transparentTheme(trans = 0.4)
@@ -123,8 +104,6 @@ featurePlot(x = heartattack %>% dplyr::select(age, caa, trtbps, thalachh),
             plot = "density", pch = "|",
             auto.key = list(columns = 2))
 ```
-
-
 
 ```{r}
 x <- model.matrix(output~age+caa+trtbps+chol+thalachh, heartattack)[,-11]
@@ -143,8 +122,13 @@ glm.fit = glm(output ~ .,
               subset = indexTrain,
               family = binomial(link = "logit"))
 summary(glm.fit)
-```
 
+model.glm <- train(x = x_train,
+                    y = y_train,
+                    method = "glm",
+                    metric = "ROC",
+                    trControl = ctrl)
+```
 
 ```{r}
 glmnGrid <- expand.grid(.alpha = seq(0, 1, length = 11),
@@ -196,7 +180,6 @@ coef(model.mars$finalModel) %>% knitr::kable(col.names = "Coefficient")
 
 pdp::partial(model.mars, pred.var = c("age"), grid.resolution = 200) %>% autoplot()
 vip(model.mars$finalModel)
-
 ```
 
 
@@ -243,25 +226,31 @@ plotcp(tree1)
 minErr <- which.min(cpTable[,4])
 tree2 <- prune(tree1, cp = cpTable[minErr,1])
 rpart.plot(tree2)
+
+set.seed(100)
+ctree.fit <- train(output ~ . , heartattack,
+                   subset = indexTrain,
+                   method = "ctree",
+                   tuneGrid = data.frame(mincriterion = 1-exp(seq(-2, -1, length = 50))),
+                   metric = "ROC",
+                   trControl = ctrl)
 ```
 
 # Random Tree
 
 ```{r}
-# test error
 set.seed(100)
 rf <- randomForest(output~ . ,heartattack, subset = indexTrain ,mtry = 6)
 
-pred.rf <- predict(rf, newdata = testing_df)
-confusionMatrix(data = pred.rf, 
-                reference = heartattack$output[-indexTrain])
-
 set.seed(100)
-rf2 <- ranger(output ~ . ,training_df ,mtry = 6)
-pred.rf2 <- predict(rf2, data = testing_df)$predictions
 
-confusionMatrix(data = pred.rf2, 
-                reference = heartattack$output[-indexTrain])
+rpart.fit <- train(output ~ . ,
+                   heartattack,
+                   subset = indexTrain,
+                   method = "rpart",
+                   tuneGrid = data.frame(cp = exp(seq(-6,-3, len = 50))),
+                   trControl = ctrl,
+                   metric = "ROC")
 ```
 
 # Naive Bayes 
@@ -279,4 +268,43 @@ model.nb <- train(x = heartattack[indexTrain,1:10],
                   trControl = ctrl)
 
 plot(model.nb)
+```
+
+```{r}
+res <- resamples(list(LDA = model.lda, NB = model.nb, Rpart = rpart.fit, ctree = ctree.fit, glm = model.glm, glmn = model.glmn, Mars = model.mars))
+summary(res)
+
+lda.pred <- predict(model.lda, newdata = heartattack[-indexTrain,], type = "prob")[,2]
+nb.pred <- predict(model.nb, newdata = heartattack[-indexTrain,], type = "prob")[,2]
+rpart.pred <- predict(rpart.fit, newdata = heartattack[-indexTrain,],type = "prob")[,1]
+ctree.pred <- predict(ctree.fit, newdata = heartattack[-indexTrain,],type = "prob")[,1]
+glm.pred <- predict(model.glm, newdata = heartattack[-indexTrain,], type = "prob")[,2]
+glmn.pred <- predict(model.glmn, newdata = heartattack[-indexTrain,], type = "prob")[,2]
+mars.pred <- predict(model.mars, newdata = heartattack[-indexTrain,], type = "prob")[,2]
+
+
+
+auc <- c(roc.lda$auc[1], roc.nb$auc[1],roc.rpart$auc[1], roc.ctree$auc[1])
+
+roc.lda <- roc(heartattack$output[-indexTrain], lda.pred)
+roc.nb <- roc(heartattack$output[-indexTrain], nb.pred)
+roc.rpart <- roc(heartattack$output[-indexTrain], rpart.pred)
+roc.ctree <- roc(heartattack$output[-indexTrain], ctree.pred)
+roc.glm <- roc(heartattack$output[-indexTrain], glm.pred)
+roc.glmn <- roc(heartattack$output[-indexTrain], glmn.pred)
+roc.mars <- roc(heartattack$output[-indexTrain], mars.pred)
+
+
+plot(roc.lda, legacy.axes = TRUE)
+plot(roc.nb, col = 3, add = TRUE)
+plot(roc.rpart, legacy.axes = TRUE)
+plot(roc.ctree, col = 2, add = TRUE)
+plot(roc.glm, col = 2, add = TRUE)
+plot(roc.glmn, col = 2, add = TRUE)
+plot(roc.mars, col = 2, add = TRUE)
+
+modelNames <- c("lda","nb", "rpart", "ctree", "glm", "glmn", "mars")
+
+legend("bottomright", legend = paste0(modelNames, ": ", round(auc,3)),
+col = 1:3, lwd = 2)
 ```
