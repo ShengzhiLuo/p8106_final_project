@@ -36,6 +36,7 @@ library(ranger)
 library(gbm)
 ```
 
+# Data load and pre-process
 ```{r}
 heartattack = read_csv("heartattack.csv") %>%
               mutate(
@@ -261,4 +262,21 @@ pred.rf2 <- predict(rf2, data = testing_df)$predictions
 
 confusionMatrix(data = pred.rf2, 
                 reference = heartattack$output[-indexTrain])
+```
+
+# Naive Bayes 
+```{r}
+nbGrid <- expand.grid(usekernel = c(FALSE,TRUE),
+                      fL = 1,
+                      adjust = seq(.1, 3, by = .1))
+set.seed(100)
+
+model.nb <- train(x = heartattack[indexTrain,1:10],
+                  y = heartattack$output[indexTrain],
+                  method = "nb",
+                  tuneGrid = nbGrid,
+                  metric = "ROC",
+                  trControl = ctrl)
+
+plot(model.nb)
 ```
