@@ -302,6 +302,8 @@ plot(roc.mars, col = 2, add = TRUE)
 
 modelNames <- c("lda", "rpart", "ctree", "glm", "glmn", "mars")
 
-legend("bottomright", legend = paste0(modelNames, ": ", round(auc,3)),
-col = 1:6, lwd = 2)
+ggroc(list(roc.lda, roc.rpart ,roc.ctree, roc.glm, roc.glmn, roc.mars), legacy.axes = TRUE) +
+scale_color_discrete(labels = paste0(modelNames, " (", round(auc,3),")"),
+name = "Models (AUC)") +
+geom_abline(intercept = 0, slope = 1, color = "grey")
 ```
