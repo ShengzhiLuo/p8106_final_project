@@ -34,6 +34,8 @@ library(partykit)
 library(randomForest)
 library(ranger)
 library(gbm)
+library(ggplot2)
+library(ggpubr)
 ```
 
 # Data load and pre-process
@@ -87,6 +89,7 @@ y_train = training_df$output
 # Testing data
 x_test <- model.matrix(output~.,testing_df)[, -11]
 y_test <- testing_df$output
+x_train_df = data.frame(x_train)
 ```
 
 ```{r}
@@ -97,7 +100,7 @@ skimr::skim_without_charts(heartattack)
 ```{r}
 theme1 = transparentTheme(trans = 0.4)
 trellis.par.set(theme1)
-featurePlot(x = heartattack %>% dplyr::select(age, caa, trtbps, thalachh),
+featurePlot(x = heartattack %>% dplyr::select(age, caa, trtbps, thalachh,chol),
             y = heartattack$output,
             scales = list(x = list(relation = "free"),
                           y = list(relation = "free")),
@@ -106,36 +109,41 @@ featurePlot(x = heartattack %>% dplyr::select(age, caa, trtbps, thalachh),
 ```
 
 ```{r}
-x <- model.matrix(output~age+caa+trtbps+chol+thalachh, heartattack)[,-11]
-y <- heartattack$output
-corrplot::corrplot(cor(x))
+par(mfrow = c(2, 3))
+fp1 <- ggplot(training_df) + geom_bar(aes(x = sex)) 
+fp2 <- ggplot(training_df) + geom_bar(aes(x = cp)) 
+fp3 <- ggplot(training_df) + geom_bar(aes(x = fbs)) 
+fp4 <- ggplot(training_df) + geom_bar(aes(x = restecg)) 
+fp5 <- ggplot(training_df) + geom_bar(aes(x = exng))
+figure <- ggarrange(fp1,fp2, fp3, fp4, fp5,
+                    ncol = 2, nrow = 3)
+figure
 ```
 
-## glm/glmn
+
+
+## glm
 ```{r}
 set.seed(100)
 ctrl = trainControl(method = "cv",
                     summaryFunction = twoClassSummary,
                     classProbs = TRUE)
-glm.fit = glm(output ~ .,
-              data = heartattack,
-              subset = indexTrain,
-              family = binomial(link = "logit"))
-summary(glm.fit)
 
-model.glm <- train(x = heartattack[indexTrain,1:10],
-                   y = heartattack$output[indexTrain],
+model.glm <- train(output~.,
+                    data=training_df,
                     method = "glm",
                     metric = "ROC",
                     trControl = ctrl)
+
 ```
 
+## penalized glm
 ```{r}
 glmnGrid <- expand.grid(.alpha = seq(0, 1, length = 11),
                         .lambda = exp(seq(2, -2, length = 35)))
 set.seed(100)
-model.glmn <- train(x = x_train,
-                    y = y_train,
+model.glmn <- train(output~.,
+                    data=training_df,
                     method = "glmnet",
                     tuneGrid = glmnGrid,
                     metric = "ROC",
@@ -148,6 +156,7 @@ myPar <- list(superpose.symbol = list(col = myCol),
               superpose.line = list(col = myCol))
 
 plot(model.glmn, par.settings = myPar, xTrans = function(x) log(x))
+
 ```
 
 ## GAM
@@ -307,3 +316,5 @@ scale_color_discrete(labels = paste0(modelNames, " (", round(auc,3),")"),
 name = "Models (AUC)") +
 geom_abline(intercept = 0, slope = 1, color = "grey")
 ```
+
+
